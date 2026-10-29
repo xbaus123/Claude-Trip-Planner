@@ -90,3 +90,8 @@ if __name__ == "__main__":
     
     print("\n--- TOP DEALS FOUND ---")
     print(json.dumps(results, indent=2))
+
+    import os
+    os.makedirs("cache", exist_ok=True)
+    with open("cache/flights.json" if "flight" in __file__ else "cache/hotels.json", "w") as f:
+        json.dump(results, f, indent=2)
