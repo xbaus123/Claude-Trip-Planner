@@ -57,7 +57,7 @@ async def scrape_flights(origin, dest, departure_date, return_date):
         await engine.start(p)
         print(f"Loading {url} (this takes 10-15 seconds)...")
 
-        page = await engine.context.new_page()
+        page = await engine.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 

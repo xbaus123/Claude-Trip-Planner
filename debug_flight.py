@@ -11,7 +11,7 @@ async def f():
     engine = StealthBrowser(headless=True)
     async with async_playwright() as p:
         await engine.start(p)
-        page = await engine.context.new_page()
+        page = await engine.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_selector("div.nrc6-wrapper", timeout=25000)
