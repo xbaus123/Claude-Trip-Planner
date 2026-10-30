@@ -41,7 +41,7 @@ def load_profile(profile_path="input/traveler_profile.json"):
     profile["deal_breakers"].update(loaded.get("deal_breakers", {}))
     return profile
 
-def score_hotels(hotels_json, profile, excluded):
+def score_hotels(hotels_json, profile, excluded, hotel_exponent=2.0):
     min_rating = float(profile["hotel_minimum_rating"])
     scored_hotels = []
     for hotel in hotels_json:
@@ -63,8 +63,8 @@ def score_hotels(hotels_json, profile, excluded):
             excluded.append(f"{hotel['name']}: rated {rating}, below the {min_rating} minimum")
             continue
 
-        # The Squared-Rating Heuristic
-        raw_score = (rating ** 2) / price
+        # Rating raised to a tunable power: higher exponents favor quality over price
+        raw_score = (rating ** hotel_exponent) / price
 
         scored_hotels.append({
             **hotel,
@@ -84,11 +84,13 @@ def score_hotels(hotels_json, profile, excluded):
 
 def flight_label(flight):
     origin = f" [{flight['origin']}]" if flight.get('origin') else ""
+    out_times = flight.get('outbound', {}).get('times') or flight.get('times')
     return_times = flight.get('return', {}).get('times')
-    returning = f" (return {return_times})" if return_times else ""
-    return f"{flight['airline']}{origin} {flight['price']}{returning}"
+    legs = [f"out {out_times}" if out_times else "", f"return {return_times}" if return_times else ""]
+    schedule = f" ({', '.join(l for l in legs if l)})" if any(legs) else ""
+    return f"{flight['airline']}{origin} {flight['price']}{schedule}"
 
-def score_flights(flights_json, profile, excluded):
+def score_flights(flights_json, profile, excluded, time_penalty_per_hour=5.0):
     max_layover_hours = profile.get("max_layover_hours")
     seen = set()
     scored_flights = []
@@ -140,9 +142,9 @@ def score_flights(flights_json, profile, excluded):
         # Base score out of 100 based strictly on price
         base_score = (lowest_price / flight['numeric_price']) * 100
 
-        # Deduct 5 points for every hour over the fastest available routing
+        # Deduct points for every hour over the fastest available routing
         extra_hours = (flight['duration_mins'] - fastest_flight) / 60 if flight['duration_mins'] else 0
-        time_penalty = max(0, extra_hours * 5)
+        time_penalty = max(0, extra_hours * time_penalty_per_hour)
 
         flight['value_score'] = round(base_score - time_penalty, 1)
 
@@ -173,7 +175,9 @@ def build_combos(top_flights, top_hotels, limit=3):
     combos.sort(key=lambda c: (-c['combo_score'], c['estimated_total'] or 0))
     return combos[:limit]
 
-def print_report(top_flights, top_hotels, combos, excluded):
+def print_report(top_flights, top_hotels, combos, excluded, weights):
+    print(f"\n⚖️  Weights: time penalty {weights['time_penalty']:g} pts/hour, "
+          f"hotel rating exponent {weights['hotel_exponent']:g}")
     print("\n🧳 --- TOP COMBINATIONS ---")
     for i, c in enumerate(combos, 1):
         total = f"~${c['estimated_total']:,.0f}" if c['estimated_total'] else "total unknown"
@@ -183,8 +187,8 @@ def print_report(top_flights, top_hotels, combos, excluded):
     print("\n✈️  --- TOP VALUE FLIGHTS ---")
     for f in top_flights[:3]:
         hours, mins = divmod(f['duration_mins'], 60)
-        print(f"[{f['value_score']}/100] {flight_label(f)} | out {f.get('times', 'N/A')} "
-              f"({f.get('stops', 'N/A')}) | {hours}h {mins:02d}m round-trip transit")
+        print(f"[{f['value_score']}/100] {flight_label(f)} | {f.get('stops', 'N/A')} "
+              f"| {hours}h {mins:02d}m round-trip transit")
 
     print("\n🏨 --- TOP VALUE HOTELS ---")
     for h in top_hotels[:3]:
@@ -198,7 +202,14 @@ def print_report(top_flights, top_hotels, combos, excluded):
 def main():
     parser = argparse.ArgumentParser(description="Score cached flight and hotel deals.")
     parser.add_argument("--json", action="store_true", help="Print structured results instead of the text report")
+    parser.add_argument("--time-penalty", type=float, default=5.0,
+                        help="Points deducted per hour over the fastest routing (default: 5)")
+    parser.add_argument("--hotel-exponent", type=float, default=2.0,
+                        help="Power applied to hotel ratings before dividing by price (default: 2)")
     args = parser.parse_args()
+    if args.time_penalty < 0 or args.hotel_exponent < 0:
+        parser.error("--time-penalty and --hotel-exponent must be non-negative")
+    weights = {"time_penalty": args.time_penalty, "hotel_exponent": args.hotel_exponent}
 
     if not os.path.exists("cache/hotels.json") or not os.path.exists("cache/flights.json"):
         print("Error: Cache files missing. Run the flight and hotel scrapers first.")
@@ -211,15 +222,15 @@ def main():
 
     profile = load_profile()
     excluded = []
-    top_hotels = score_hotels(hotels, profile, excluded)
-    top_flights = score_flights(flights, profile, excluded)
+    top_hotels = score_hotels(hotels, profile, excluded, args.hotel_exponent)
+    top_flights = score_flights(flights, profile, excluded, args.time_penalty)
     combos = build_combos(top_flights, top_hotels)
 
     if args.json:
-        print(json.dumps({"combos": combos, "flights": top_flights, "hotels": top_hotels,
-                          "excluded": excluded}, indent=2))
+        print(json.dumps({"weights": weights, "combos": combos, "flights": top_flights,
+                          "hotels": top_hotels, "excluded": excluded}, indent=2))
     else:
-        print_report(top_flights, top_hotels, combos, excluded)
+        print_report(top_flights, top_hotels, combos, excluded, weights)
 
 if __name__ == "__main__":
     main()
