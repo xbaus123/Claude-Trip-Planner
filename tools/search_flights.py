@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from browser_engine import StealthBrowser
 from score_deals import parse_duration
+from scrape_debug import log_card_error, log_card_skipped, log_no_cards, log_parse_summary
 
 # Matches the "6:00 am – 3:37 pm +1" header that starts each leg on a result card
 LEG_TIMES_RE = re.compile(r'(\d{1,2}:\d{2}\s*[ap]m)\s*[–-]\s*(\d{1,2}:\d{2}\s*[ap]m)(\s*\+\d)?')
@@ -80,7 +81,12 @@ async def scrape_flights(origin, dest, departure_date, return_date):
     soup = BeautifulSoup(html, 'html.parser')
 
     # Target individual flight cards
-    flight_results = soup.select("div.nrc6-wrapper, div.inner-row, div[class*='resultWrapper']")
+    card_selector = "div.nrc6-wrapper, div.inner-row, div[class*='resultWrapper']"
+    flight_results = soup.select(card_selector)
+    label = f"flights_{origin}"
+    if not flight_results:
+        log_no_cards(label, card_selector, html)
+        return []
 
     top_deals = []
 
@@ -132,10 +138,13 @@ async def scrape_flights(origin, dest, departure_date, return_date):
                     "return": return_leg,
                     "booking_link": url
                 })
+            else:
+                log_card_skipped(label, idx, flight, ["price (div[class*='price'] with a $ amount)"])
 
         except Exception:
-            continue
+            log_card_error(label, idx, flight)
 
+    log_parse_summary(label, min(len(flight_results), 5), len(top_deals))
     return top_deals
 
 async def main(origins, dest, departure_date, return_date):

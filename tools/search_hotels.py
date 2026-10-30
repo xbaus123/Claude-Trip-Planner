@@ -8,6 +8,7 @@ from datetime import date
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from browser_engine import StealthBrowser
+from scrape_debug import log_card_error, log_card_skipped, log_no_cards, log_parse_summary
 
 async def scrape_hotels(dest, checkin, checkout):
     print(f"🏨 Searching hotels: {dest} ({checkin} - {checkout})")
@@ -39,7 +40,12 @@ async def scrape_hotels(dest, checkin, checkout):
         await engine.close()
 
     soup = BeautifulSoup(html, 'html.parser')
-    hotel_results = soup.select("div[class*='hotel-card'], div[class*='resultWrapper'], div.yuAt")
+    card_selector = "div[class*='hotel-card'], div[class*='resultWrapper'], div.yuAt"
+    hotel_results = soup.select(card_selector)
+    label = "hotels"
+    if not hotel_results:
+        log_no_cards(label, card_selector, html)
+        return []
     
     top_hotels = []
     nights = (date.fromisoformat(checkout) - date.fromisoformat(checkin)).days
@@ -75,10 +81,18 @@ async def scrape_hotels(dest, checkin, checkout):
                     "nights": nights,
                     "booking_link": url
                 })
-                
+            else:
+                missing = []
+                if name == "Unknown Hotel":
+                    missing.append("name (div[class*='name'], h3, .FLMq-title)")
+                if price == "Unknown":
+                    missing.append("price (div[class*='price'] with a $ amount)")
+                log_card_skipped(label, idx, hotel, missing)
+
         except Exception:
-            continue
-            
+            log_card_error(label, idx, hotel)
+
+    log_parse_summary(label, min(len(hotel_results), 5), len(top_hotels))
     return top_hotels
 
 if __name__ == "__main__":
