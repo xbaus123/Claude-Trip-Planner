@@ -50,5 +50,6 @@ The real profile is gitignored, so each person keeps their own. Only edit `trave
      Signals can stack: for "fastest routing but cheap hotels", use `--time-penalty 15 --hotel-exponent 1`. If the user names a weight directly (e.g. "penalize layovers heavily"), pick values that fit the request rather than a preset row. The report's first line shows the weights it applied; tell the user which weights you used and why.
 4. **Presentation:**
    - Output the top 3 flight and hotel combinations in a clean terminal table, and mention notable profile exclusions (e.g. a cheaper flight dropped for a long layover).
+   - Include a link for every flight you list, in the combinations and the flight options alike. Use its `booking_link`: a Kayak page with that exact itinerary pinned at the top, which keeps working later. Don't present `provider_booking_link` as the main link; it goes straight to the airline or agency checkout but expires within hours of the search. If a flight's `booking_link` equals its `search_link`, say the link opens the search results rather than that flight.
    - Never print raw JSON payloads into the terminal.
-   - Automatically ask the user if they want to save the itinerary. If yes, write a cleanly formatted Markdown summary to `trips/<destination>-<year>.md`.
+   - Automatically ask the user if they want to save the itinerary. If yes, write a cleanly formatted Markdown summary to `trips/<destination>-<year>.md`, with each flight's `booking_link` as a Markdown link (e.g. `[View on Kayak](...)`).

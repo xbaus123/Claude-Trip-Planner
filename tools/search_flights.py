@@ -4,11 +4,12 @@ import argparse
 import os
 import re
 import sys
+from urllib.parse import urljoin, urlparse, parse_qs
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from browser_engine import StealthBrowser
 from score_deals import parse_duration
-from scrape_debug import log_card_error, log_card_skipped, log_no_cards, log_parse_summary
+from scrape_debug import log_card_error, log_card_skipped, log_no_cards, log_parse_summary, logger
 
 # Matches the "6:00 am – 3:37 pm +1" header that starts each leg on a result card
 LEG_TIMES_RE = re.compile(r'(\d{1,2}:\d{2}\s*[ap]m)\s*[–-]\s*(\d{1,2}:\d{2}\s*[ap]m)(\s*\+\d)?')
@@ -16,6 +17,49 @@ LAYOVER_RE = re.compile(r'((?:\d{1,2}h\s*)?\d{1,2}m)\s*layover')
 # Skip layover durations (e.g. "3h 38m layover") to get the leg's total duration
 DURATION_RE = re.compile(r'\d{1,2}h\s*\d{1,2}m(?!\s*layover)')
 FARE_RE = re.compile(r'basic economy|premium economy|economy|business|first')
+
+CARD_SELECTOR = "div.nrc6-wrapper, div.inner-row, div[class*='resultWrapper']"
+
+# Kayak's result cards contain no <a href>; each card's link data lives only in its React props
+# (apiFlightResult). This copies it onto the card as data-* attributes so BeautifulSoup can read it.
+#   shareableUrl  -> permanent Kayak page with that exact itinerary pinned at the top
+#   bookingUrl    -> redirect straight to the cheapest provider; tied to this search session, expires
+TAG_LINKS_JS = """(selector) => {
+  const fiberOf = el => { const k = Object.keys(el).find(k => k.startsWith('__reactFiber')); return k ? el[k] : null; };
+  const abs = u => { try { return u ? new URL(u, location.origin).href : ''; } catch (e) { return ''; } };
+  let tagged = 0;
+  for (const card of document.querySelectorAll(selector)) {
+    let f = fiberOf(card), r = null;
+    for (let n = 0; f && n < 60 && !r; n++, f = f.return) {
+      const p = f.memoizedProps;
+      if (p && typeof p === 'object' && p.apiFlightResult) r = p.apiFlightResult;
+    }
+    if (!r) continue;
+    card.setAttribute('data-result-id', r.resultId || '');
+    card.setAttribute('data-share-url', abs(r.shareableUrl));
+    card.setAttribute('data-booking-url', abs(r.bookingOptions?.[0]?.bookingUrl?.url));
+    tagged++;
+  }
+  return tagged;
+}"""
+
+def flight_links(card, search_url, origin, dest, departure_date, return_date):
+    """Returns (permanent Kayak link for this itinerary, short-lived provider checkout link).
+
+    Prefers the data-* attributes TAG_LINKS_JS copied from React. If those are missing, rebuilds the
+    permanent link from the card's own /book/flight?code=...<resultId> anchor (desktop layout only).
+    """
+    share = card.get("data-share-url")
+    booking = card.get("data-booking-url")
+    anchor = card.select_one("a[href*='/book/flight']")
+    if anchor and not booking:
+        booking = urljoin(search_url, anchor["href"])
+    if not share and booking:
+        code = parse_qs(urlparse(booking).query).get("code", [""])[0]
+        result_id = code.rsplit(".", 1)[-1]
+        if re.fullmatch(r"[0-9a-f]{32}", result_id):
+            share = f"https://www.kayak.com/flights/{origin}-{dest}/{departure_date}/{return_date}/f{result_id}"
+    return share, booking
 
 def to_hour(time_str):
     """Converts '9:28 pm' into a 24-hour integer hour."""
@@ -64,6 +108,14 @@ async def scrape_flights(origin, dest, departure_date, return_date):
             # Wait for any generic div that looks like a result container, or the price filters
             await page.wait_for_selector("div.nrc6-wrapper", timeout=25000)
             await page.wait_for_timeout(3000)
+            try:
+                tagged = await page.evaluate(TAG_LINKS_JS, CARD_SELECTOR)
+                if not tagged:
+                    logger.warning("[flights_%s] Found no per-flight links in Kayak's result data; "
+                                   "deals will link to the search page instead", origin)
+            except Exception:
+                logger.exception("[flights_%s] Per-flight link extraction failed; "
+                                 "deals will link to the search page instead", origin)
             html = await page.content()
 
         except Exception as e:
@@ -81,7 +133,7 @@ async def scrape_flights(origin, dest, departure_date, return_date):
     soup = BeautifulSoup(html, 'html.parser')
 
     # Target individual flight cards
-    card_selector = "div.nrc6-wrapper, div.inner-row, div[class*='resultWrapper']"
+    card_selector = CARD_SELECTOR
     flight_results = soup.select(card_selector)
     label = f"flights_{origin}"
     if not flight_results:
@@ -119,6 +171,9 @@ async def scrape_flights(origin, dest, departure_date, return_date):
             outbound = legs[0] if legs else {}
             return_leg = legs[1] if len(legs) > 1 else {}
             fare_match = FARE_RE.search(flight_text)
+            flight_link, provider_link = flight_links(flight, url, origin, dest, departure_date, return_date)
+            if not flight_link:
+                logger.warning("[flights_%s] Result card #%d has no per-flight link; using the search page", origin, idx)
 
             if price != "Unknown":
                 top_deals.append({
@@ -136,7 +191,11 @@ async def scrape_flights(origin, dest, departure_date, return_date):
                     "stops": outbound.get("stops", "Unknown Stops"),
                     "outbound": outbound,
                     "return": return_leg,
-                    "booking_link": url
+                    # Kayak page for this exact itinerary; falls back to the search page
+                    "booking_link": flight_link or url,
+                    # Straight to the cheapest provider's checkout; only valid for a few hours
+                    "provider_booking_link": provider_link,
+                    "search_link": url,
                 })
             else:
                 log_card_skipped(label, idx, flight, ["price (div[class*='price'] with a $ amount)"])
@@ -178,6 +237,7 @@ if __name__ == "__main__":
     print("\n--- TOP DEALS FOUND ---")
     for f in results:
         print(f"[{f['origin']}] {f['airline']} - {f['price']} | out {f['times']} ({f['duration']}, {f['stops']})")
+        print(f"    {f['booking_link']}")
 
     os.makedirs("cache", exist_ok=True)
     with open("cache/flights.json", "w") as f:

@@ -183,12 +183,14 @@ def print_report(top_flights, top_hotels, combos, excluded, weights):
         total = f"~${c['estimated_total']:,.0f}" if c['estimated_total'] else "total unknown"
         print(f"{i}. [{c['combo_score']}/100] {flight_label(c['flight'])} + {c['hotel']['name']} "
               f"{c['hotel']['price_per_night']}/night x {c['nights']} = {total}")
+        print(f"   🔗 Flight: {c['flight'].get('booking_link', 'n/a')}")
 
     print("\n✈️  --- TOP VALUE FLIGHTS ---")
     for f in top_flights[:3]:
         hours, mins = divmod(f['duration_mins'], 60)
         print(f"[{f['value_score']}/100] {flight_label(f)} | {f.get('stops', 'N/A')} "
               f"| {hours}h {mins:02d}m round-trip transit")
+        print(f"   🔗 {f.get('booking_link', 'n/a')}")
 
     print("\n🏨 --- TOP VALUE HOTELS ---")
     for h in top_hotels[:3]:
