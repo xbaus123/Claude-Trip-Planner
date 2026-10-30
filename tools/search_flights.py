@@ -46,29 +46,46 @@ async def scrape_flights(origin, dest, departure_date, return_date):
     
     for idx, flight in enumerate(flight_results[:5]):
         try:
-            # 1. Clean the Price using Regex (extracts "$442" from "10$442Basic...")
+            # 1. Clean the Price using Regex
             price_element = flight.select_one("div[class*='price']")
             price_text = price_element.text.strip() if price_element else ""
             price_match = re.search(r'\$[0-9,]+', price_text)
             price = price_match.group(0) if price_match else "Unknown"
             
-            # 2. Find the Airline (Kayak often hides this in the logo's 'alt' text)
+            # 2. Find the Airline
             airline = "Multiple Airlines"
             img_element = flight.select_one("img[alt]")
             if img_element and img_element.get("alt"):
                 airline = img_element.get("alt")
             else:
-                # Fallback to text containers
                 airline_element = flight.select_one("div[class*='airline'], div[dir='auto']")
                 if airline_element and airline_element.text.strip():
                     airline = airline_element.text.strip()
+                    
+            # 3. Extract Times, Duration, and Stops via raw text Regex
+            flight_text = flight.text.lower()
             
+            time_match = re.search(r'\d{1,2}:\d{2}\s*[ap]m.*?\d{1,2}:\d{2}\s*[ap]m', flight_text)
+            times = time_match.group(0).upper() if time_match else "Unknown Times"
+            
+            duration_match = re.search(r'\d{1,2}h\s*\d{1,2}m', flight_text)
+            duration = duration_match.group(0) if duration_match else "Unknown Duration"
+            
+            if "nonstop" in flight_text:
+                stops = "Nonstop"
+            else:
+                stops_match = re.search(r'\d+\s*stop', flight_text)
+                stops = stops_match.group(0) if stops_match else "Unknown Stops"
+
             # Prevent empty duplicates from cluttering the list
             if price != "Unknown":
                 top_deals.append({
                     "rank": len(top_deals) + 1,
                     "price": price,
                     "airline": airline,
+                    "times": times,
+                    "duration": duration,
+                    "stops": stops,
                     "booking_link": url
                 })
                 
