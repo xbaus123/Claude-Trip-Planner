@@ -138,6 +138,21 @@ async def scrape_flights(origin, dest, departure_date, return_date):
 
     return top_deals
 
+async def main(origins, dest, departure_date, return_date):
+    """Scrapes every origin concurrently and merges the results in origin order."""
+    tasks = [scrape_flights(origin, dest, departure_date, return_date) for origin in origins]
+    # return_exceptions keeps one failed origin from cancelling the others
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for origin, outcome in zip(origins, outcomes):
+        if isinstance(outcome, Exception):
+            print(f"   {origin}: search failed ({outcome})")
+            continue
+        print(f"   {origin}: {len(outcome)} flights found")
+        results.extend(outcome)
+    return results
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape flight deals.")
     parser.add_argument("--origin", required=True, help="Origin IATA, or several comma-separated (e.g., CRW,HTS,PIT)")
@@ -147,12 +162,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Search each origin in turn and merge everything into one cache file
-    results = []
-    for origin in [o.strip().upper() for o in args.origin.split(",") if o.strip()]:
-        origin_results = asyncio.run(scrape_flights(origin, args.dest, args.depart, args.return_date))
-        print(f"   {origin}: {len(origin_results)} flights found")
-        results.extend(origin_results)
+    # Search all origins at once (deduplicated, order kept) and merge into one cache file
+    origins = list(dict.fromkeys(o.strip().upper() for o in args.origin.split(",") if o.strip()))
+    results = asyncio.run(main(origins, args.dest, args.depart, args.return_date))
 
     print("\n--- TOP DEALS FOUND ---")
     for f in results:
