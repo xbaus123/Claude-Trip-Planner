@@ -1,0 +1,10 @@
+{
+  "home_airports": ["CRW", "HTS", "PIT"],
+  "travel_style": "value_optimized",
+  "max_layover_hours": 3,
+  "hotel_minimum_rating": 7.5,
+  "deal_breakers": {
+    "red_eye_flights": false,
+    "unrated_hotels": true
+  }
+}
