@@ -26,7 +26,10 @@ if not first_run:
 trips = sorted(x.stem for x in (root / "trips").glob("*.md")) if (root / "trips").is_dir() else []
 
 venv_tip = ""
-if not os.environ.get("VIRTUAL_ENV"):
+if not (root / "venv").is_dir():
+    venv_tip = ("\n\n  Heads up: Python packages aren't installed yet (no venv/ folder).\n"
+                "  Follow the Setup steps in README.md, or ask me to do it for you.")
+elif not os.environ.get("VIRTUAL_ENV"):
     venv_tip = ("\n\n  Heads up: the venv isn't active, so the scrapers may fail.\n"
                 "  Quit, run `source venv/bin/activate`, then start `claude` again.")
 
@@ -48,8 +51,8 @@ msg = f"""
 
   Dynamic Scoring Weights:
   I parse your keywords to adjust the scoring math on the fly:
-    • Time Penalty: Deducts points per extra travel hour (Default: 5). Use "budget" to drop to 0, or "fastest" to increase it.
-    • Hotel Exponent: Amplifies the value of high ratings (Default: 2). Use "luxury" to cube the ratings, or "budget" to lower it to 1.
+    • Time Penalty: Deducts points per extra travel hour (Default: 5). Use "budget" to drop it to 2, or "fastest" to raise it to 15.
+    • Hotel Exponent: Amplifies the value of high ratings (Default: 2). Use "comfort" for 3, "luxury" for 4, or "budget" to lower it to 1.
 
   Saved trips: {", ".join(trips) if trips else "none yet"}{venv_tip}
 """

@@ -15,7 +15,8 @@ If `input/traveler_profile.json` does not exist, this is a new user. Before any 
    - **Red-eye flights:** OK (`red_eye_flights: false`) or exclude them (`true`)
    - **Unrated hotels:** exclude them (`unrated_hotels: true`, recommended) or allow (`false`)
 4. Write `input/traveler_profile.json` using the same shape as `input/traveler_profile.example.json`, then show a one-line summary and tell them they can change it any time by asking or by editing the file.
-5. If their first message was already a trip request, carry on with it using the new profile.
+5. If the `venv/` folder doesn't exist, offer to install dependencies: `python3 -m venv venv && venv/bin/pip install -r requirements.txt && venv/bin/playwright install chromium`. Afterwards, tell them to quit, run `source venv/bin/activate`, and start `claude` again.
+6. If their first message was already a trip request, carry on with it using the new profile.
 
 The real profile is gitignored, so each person keeps their own. Only edit `traveler_profile.example.json` when the schema changes.
 
