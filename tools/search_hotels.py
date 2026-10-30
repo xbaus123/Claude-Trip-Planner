@@ -8,6 +8,7 @@ from datetime import date
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from browser_engine import StealthBrowser
+from prices import parse_price_text
 from scrape_debug import log_card_error, log_card_skipped, log_no_cards, log_parse_summary
 
 async def scrape_hotels(dest, checkin, checkout):
@@ -60,8 +61,9 @@ async def scrape_hotels(dest, checkin, checkout):
             # 2. Extract and Clean Price
             price_element = hotel.select_one("div[class*='price']")
             price_text = price_element.text.strip() if price_element else ""
-            price_match = re.search(r'\$[0-9,]+', price_text)
-            price = price_match.group(0) if price_match else "Unknown"
+            # Any currency/locale format: "$1,234", "€1.234", "1 234 kr", "CHF 1'234.50"
+            parsed_price = parse_price_text(price_text)
+            price, price_amount, currency = parsed_price if parsed_price else ("Unknown", None, None)
             
             # 3. Extract Rating
             rating_element = hotel.select_one("div[class*='score'], div[class*='rating']")
@@ -74,6 +76,8 @@ async def scrape_hotels(dest, checkin, checkout):
                     "rank": len(top_hotels) + 1,
                     "name": name,
                     "price_per_night": price,
+                    "price_amount": price_amount,
+                    "currency": currency,
                     "rating": rating,
                     "dest": dest,
                     "checkin": checkin,
@@ -86,7 +90,7 @@ async def scrape_hotels(dest, checkin, checkout):
                 if name == "Unknown Hotel":
                     missing.append("name (div[class*='name'], h3, .FLMq-title)")
                 if price == "Unknown":
-                    missing.append("price (div[class*='price'] with a $ amount)")
+                    missing.append("price (div[class*='price'] with a priced amount)")
                 log_card_skipped(label, idx, hotel, missing)
 
         except Exception:

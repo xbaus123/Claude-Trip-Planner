@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from browser_engine import StealthBrowser
 from score_deals import parse_duration
+from prices import parse_price_text
 from scrape_debug import log_card_error, log_card_skipped, log_no_cards, log_parse_summary, logger
 
 # Matches the "6:00 am – 3:37 pm +1" header that starts each leg on a result card
@@ -147,8 +148,9 @@ async def scrape_flights(origin, dest, departure_date, return_date):
             # 1. Clean the Price using Regex
             price_element = flight.select_one("div[class*='price']")
             price_text = price_element.text.strip() if price_element else ""
-            price_match = re.search(r'\$[0-9,]+', price_text)
-            price = price_match.group(0) if price_match else "Unknown"
+            # Any currency/locale format: "$1,234", "€1.234", "1 234 kr", "CHF 1'234.50"
+            parsed_price = parse_price_text(price_text)
+            price, price_amount, currency = parsed_price if parsed_price else ("Unknown", None, None)
 
             # 2. Find the Airline
             airline = "Multiple Airlines"
@@ -183,6 +185,8 @@ async def scrape_flights(origin, dest, departure_date, return_date):
                     "depart_date": departure_date,
                     "return_date": return_date,
                     "price": price,
+                    "price_amount": price_amount,
+                    "currency": currency,
                     "airline": airline,
                     "fare_class": fare_match.group(0).title() if fare_match else "Unknown",
                     # Top-level fields describe the outbound leg
@@ -198,7 +202,7 @@ async def scrape_flights(origin, dest, departure_date, return_date):
                     "search_link": url,
                 })
             else:
-                log_card_skipped(label, idx, flight, ["price (div[class*='price'] with a $ amount)"])
+                log_card_skipped(label, idx, flight, ["price (div[class*='price'] with a priced amount)"])
 
         except Exception:
             log_card_error(label, idx, flight)

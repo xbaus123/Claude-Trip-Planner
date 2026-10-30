@@ -2,7 +2,9 @@ import argparse
 import json
 import os
 import re
+from collections import Counter
 from datetime import date
+from prices import format_money, parse_price_text
 
 PROFILE_DEFAULTS = {
     "hotel_minimum_rating": 7.0,
@@ -22,12 +24,31 @@ def parse_duration(duration_str):
         minutes = int(m_match.group(1))
     return (hours * 60) + minutes
 
-def parse_price(price_str):
-    """Converts '$1,234' into 1234.0, or None if it isn't a price."""
-    try:
-        return float(str(price_str).replace('$', '').replace(',', ''))
-    except ValueError:
-        return None
+def parse_price(deal, field):
+    """Returns (amount, currency) for a cached deal, or (None, None) if it has no usable price.
+
+    Uses the amount the scraper already parsed; falls back to parsing the display string
+    so caches written before currencies were recorded (plain "$1,234") still load.
+    """
+    if deal.get('price_amount') is not None:
+        return float(deal['price_amount']), deal.get('currency') or 'USD'
+    parsed = parse_price_text(deal.get(field))
+    return (parsed[1], parsed[2]) if parsed else (None, None)
+
+def keep_main_currency(deals, label, excluded, kind):
+    """Scores are price ratios, so deals in different currencies can't be ranked together.
+
+    Keeps the most common currency and reports the rest as exclusions instead of
+    silently comparing, say, 1,200 SEK against $300.
+    """
+    counts = Counter(d['currency'] for d in deals)
+    if len(counts) <= 1:
+        return deals
+    main = counts.most_common(1)[0][0]
+    for d in deals:
+        if d['currency'] != main:
+            excluded.append(f"{label(d)}: priced in {d['currency']}, can't be ranked against the {main} {kind}")
+    return [d for d in deals if d['currency'] == main]
 
 def load_profile(profile_path="input/traveler_profile.json"):
     """Reads the traveler profile, filling in defaults for anything missing."""
@@ -45,7 +66,7 @@ def score_hotels(hotels_json, profile, excluded, hotel_exponent=2.0):
     min_rating = float(profile["hotel_minimum_rating"])
     scored_hotels = []
     for hotel in hotels_json:
-        price = parse_price(hotel['price_per_night'])
+        price, currency = parse_price(hotel, 'price_per_night')
         if not price:
             continue
 
@@ -69,9 +90,12 @@ def score_hotels(hotels_json, profile, excluded, hotel_exponent=2.0):
         scored_hotels.append({
             **hotel,
             "numeric_price": price,
+            "currency": currency,
             "raw_score": raw_score
         })
 
+    scored_hotels = keep_main_currency(scored_hotels, lambda h: f"{h['name']} {h['price_per_night']}",
+                                       excluded, "hotels")
     if not scored_hotels:
         return []
 
@@ -95,7 +119,7 @@ def score_flights(flights_json, profile, excluded, time_penalty_per_hour=5.0):
     seen = set()
     scored_flights = []
     for flight in flights_json:
-        price = parse_price(flight['price'])
+        price, currency = parse_price(flight, 'price')
         if not price:
             continue
 
@@ -127,9 +151,11 @@ def score_flights(flights_json, profile, excluded, time_penalty_per_hour=5.0):
         scored_flights.append({
             **flight,
             "numeric_price": price,
+            "currency": currency,
             "duration_mins": duration_mins
         })
 
+    scored_flights = keep_main_currency(scored_flights, flight_label, excluded, "flights")
     if not scored_flights:
         return []
 
@@ -164,12 +190,15 @@ def build_combos(top_flights, top_hotels, limit=3):
         for hotel in top_hotels[:limit]:
             nights = stay_nights(hotel, flight)
             hotel_total = hotel['numeric_price'] * nights if nights else None
+            # Only add the two up when they're in the same currency
+            same_currency = flight['currency'] == hotel['currency']
             combos.append({
                 "flight": flight,
                 "hotel": hotel,
                 "nights": nights,
                 "hotel_total": hotel_total,
-                "estimated_total": flight['numeric_price'] + hotel_total if hotel_total else None,
+                "currency": flight['currency'] if same_currency else None,
+                "estimated_total": flight['numeric_price'] + hotel_total if hotel_total and same_currency else None,
                 "combo_score": round((flight['value_score'] + hotel['value_score']) / 2, 1),
             })
     combos.sort(key=lambda c: (-c['combo_score'], c['estimated_total'] or 0))
@@ -180,7 +209,13 @@ def print_report(top_flights, top_hotels, combos, excluded, weights):
           f"hotel rating exponent {weights['hotel_exponent']:g}")
     print("\n🧳 --- TOP COMBINATIONS ---")
     for i, c in enumerate(combos, 1):
-        total = f"~${c['estimated_total']:,.0f}" if c['estimated_total'] else "total unknown"
+        if c['estimated_total']:
+            total = f"~{format_money(c['estimated_total'], c['currency'])}"
+        elif c['flight']['currency'] != c['hotel']['currency']:
+            total = (f"total unknown (flight in {c['flight']['currency']}, "
+                     f"hotel in {c['hotel']['currency']})")
+        else:
+            total = "total unknown"
         print(f"{i}. [{c['combo_score']}/100] {flight_label(c['flight'])} + {c['hotel']['name']} "
               f"{c['hotel']['price_per_night']}/night x {c['nights']} = {total}")
         print(f"   🔗 Flight: {c['flight'].get('booking_link', 'n/a')}")
