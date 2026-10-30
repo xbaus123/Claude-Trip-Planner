@@ -21,7 +21,7 @@ async def scrape_flights(origin, dest, departure_date, return_date):
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
             # Wait for any generic div that looks like a result container, or the price filters
-            await page.wait_for_selector("div[class*='result'], div[class*='price']", timeout=25000)
+            await page.wait_for_selector("div.nrc6-wrapper", timeout=25000)
             await page.wait_for_timeout(3000)
             html = await page.content()
             
@@ -62,8 +62,9 @@ async def scrape_flights(origin, dest, departure_date, return_date):
                 if airline_element and airline_element.text.strip():
                     airline = airline_element.text.strip()
                     
-            # 3. Extract Times, Duration, and Stops via raw text Regex
-            flight_text = flight.text.lower()
+            # 3. Extract Times, Duration, and Stops from the flattened text
+            # Get all text from the card, join it with spaces, and clean up whitespace
+            flight_text = ' '.join(flight.stripped_strings).lower()
             
             time_match = re.search(r'\d{1,2}:\d{2}\s*[ap]m.*?\d{1,2}:\d{2}\s*[ap]m', flight_text)
             times = time_match.group(0).upper() if time_match else "Unknown Times"
@@ -77,7 +78,6 @@ async def scrape_flights(origin, dest, departure_date, return_date):
                 stops_match = re.search(r'\d+\s*stop', flight_text)
                 stops = stops_match.group(0) if stops_match else "Unknown Stops"
 
-            # Prevent empty duplicates from cluttering the list
             if price != "Unknown":
                 top_deals.append({
                     "rank": len(top_deals) + 1,
