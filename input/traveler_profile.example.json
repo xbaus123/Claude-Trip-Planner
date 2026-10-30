@@ -1,5 +1,5 @@
 {
-  "home_airports": ["CRW", "HTS", "PIT"],
+  "home_airports": ["XXX"],
   "travel_style": "value_optimized",
   "max_layover_hours": 3,
   "hotel_minimum_rating": 7.5,

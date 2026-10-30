@@ -9,15 +9,19 @@ from pathlib import Path
 root = Path(os.environ.get("CLAUDE_PROJECT_DIR", Path(__file__).resolve().parents[2]))
 
 # Profile summary
-try:
-    p = json.loads((root / "input" / "traveler_profile.json").read_text())
-    airports = ", ".join(p.get("home_airports", [])) or "not set"
-    style = p.get("travel_style", "value_optimized").replace("_", " ")
-    profile = (f"Home airports: {airports}  |  Style: {style}  |  "
-               f"Max layover: {p.get('max_layover_hours', '?')}h  |  "
-               f"Min hotel rating: {p.get('hotel_minimum_rating', '?')}")
-except Exception:
-    profile = "No profile found. Create input/traveler_profile.json first."
+profile_path = root / "input" / "traveler_profile.json"
+first_run = not profile_path.exists()
+profile = ""
+if not first_run:
+    try:
+        p = json.loads(profile_path.read_text())
+        airports = ", ".join(p.get("home_airports", [])) or "not set"
+        style = p.get("travel_style", "value_optimized").replace("_", " ")
+        profile = (f"Home airports: {airports}  |  Style: {style}  |  "
+                   f"Max layover: {p.get('max_layover_hours', '?')}h  |  "
+                   f"Min hotel rating: {p.get('hotel_minimum_rating', '?')}")
+    except Exception:
+        profile = "Profile file is unreadable. Ask me to fix input/traveler_profile.json."
 
 trips = sorted(x.stem for x in (root / "trips").glob("*.md")) if (root / "trips").is_dir() else []
 
@@ -50,4 +54,34 @@ msg = f"""
   Saved trips: {", ".join(trips) if trips else "none yet"}{venv_tip}
 """
 
-print(json.dumps({"systemMessage": msg}))
+if first_run:
+    msg = f"""
+  ✈  Welcome to Trip Planner
+
+  I find the best-value flight + hotel combos by scraping live fares,
+  scoring them against your traveler profile, and showing the top 3.
+
+  Looks like you're new here: there's no traveler profile yet.
+  Say hi (or anything) and I'll ask a few quick questions to set it up:
+    • Your home airports
+    • How you like to travel (budget, best value, comfort, luxury, fastest)
+    • Longest layover you'll put up with
+    • Minimum hotel rating
+    • Red-eye flights and unrated hotels: OK or not{venv_tip}
+"""
+    out = {
+        "systemMessage": msg,
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": (
+                "FIRST RUN: input/traveler_profile.json does not exist. Before doing anything "
+                "else, whatever the user's first message is, follow the 'First-Run Setup' "
+                "section of CLAUDE.md to interview the user and create the profile. If their "
+                "first message was a trip request, finish setup and then continue with it."
+            ),
+        },
+    }
+else:
+    out = {"systemMessage": msg}
+
+print(json.dumps(out))

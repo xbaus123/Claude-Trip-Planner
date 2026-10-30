@@ -5,3 +5,4 @@ trips/*.md
 !trips/example-trip.md
 debug*.png
 debug*.html
+input/traveler_profile.json
