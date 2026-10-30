@@ -2,4 +2,5 @@ venv/
 __pycache__/
 cache/
 trips/*.md
-!trips/example-trip.md
+!trips/example-trip.mddebug*.png
+debug*.html

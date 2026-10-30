@@ -2,6 +2,9 @@ import asyncio
 import json
 import argparse
 import re
+import os
+import sys
+from datetime import date
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from browser_engine import StealthBrowser
@@ -39,6 +42,7 @@ async def scrape_hotels(dest, checkin, checkout):
     hotel_results = soup.select("div[class*='hotel-card'], div[class*='resultWrapper'], div.yuAt")
     
     top_hotels = []
+    nights = (date.fromisoformat(checkout) - date.fromisoformat(checkin)).days
     
     for idx, hotel in enumerate(hotel_results[:5]):
         try:
@@ -65,6 +69,10 @@ async def scrape_hotels(dest, checkin, checkout):
                     "name": name,
                     "price_per_night": price,
                     "rating": rating,
+                    "dest": dest,
+                    "checkin": checkin,
+                    "checkout": checkout,
+                    "nights": nights,
                     "booking_link": url
                 })
                 
@@ -84,8 +92,12 @@ if __name__ == "__main__":
     results = asyncio.run(scrape_hotels(args.dest, args.checkin, args.checkout))
     
     print("\n--- TOP HOTELS FOUND ---")
-    print(json.dumps(results, indent=2))
-    import os
+    for h in results:
+        print(f"{h['name']} - {h['price_per_night']}/night ({h['rating']}★)")
+
     os.makedirs("cache", exist_ok=True)
-    with open("cache/flights.json" if "flight" in __file__ else "cache/hotels.json", "w") as f:
+    with open("cache/hotels.json", "w") as f:
         json.dump(results, f, indent=2)
+
+    if not results:
+        sys.exit(1)
